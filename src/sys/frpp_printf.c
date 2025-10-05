@@ -81,8 +81,6 @@ static size_t prv_vsnprintf_from_arg_buffer(const char *fmt_str,
   u.__ap.gp_offset = (6 * 8);
   u.__ap.fp_offset = (6 * 8 + 16 * 16);
 
-  return vsnprintf(out_buf, out_buf_size_bytes, fmt_str, u.ap);
-
 #elif defined(__aarch64__)
   // ARM64 - va_list is a complex structure
   struct __va_list {
@@ -105,8 +103,6 @@ static size_t prv_vsnprintf_from_arg_buffer(const char *fmt_str,
   u.__ap.__gr_offs = 0;
   u.__ap.__vr_offs = 0;
 
-  return vprintf(fmt_str, u.ap);
-
 #else
   // Default: assume va_list is just a pointer (ARM32, many others)
   // This works for most simple architectures
@@ -116,9 +112,8 @@ static size_t prv_vsnprintf_from_arg_buffer(const char *fmt_str,
   } u;
 
   u.ptr = (void *)arg_buf;
-  return vsnprintf(out_buf, out_buf_size_bytes, fmt_str, u.ap);
-
 #endif
+  return vsnprintf(out_buf, out_buf_size_bytes, fmt_str, u.ap);
 }
 /*****************************************************************************
  * Functions
