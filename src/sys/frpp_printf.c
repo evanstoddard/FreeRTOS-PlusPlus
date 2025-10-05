@@ -11,6 +11,9 @@
 #include "frpp/sys/frpp_printf.h"
 
 #include <errno.h>
+#include <stdio.h>
+
+#include "frpp/utils/utils.h"
 
 /*****************************************************************************
  * Definitions
@@ -36,6 +39,87 @@
  * Private Functions
  *****************************************************************************/
 
+/**
+ * @brief Reconstruct va_list from buffered va_list
+ *
+ * @param fmt_str Pointer to format string
+ * @param arg_buf Buffer of arg list
+ * @param out_buf Pointer to output buffer
+ * @param out_buf_size_bytes Size of output buffer
+ * @return Returns size of bytes written
+ */
+static size_t prv_vsnprintf_from_arg_buffer(const char *fmt_str,
+                                            const void *arg_buf, void *out_buf,
+                                            size_t out_buf_size_bytes) {
+  if (fmt_str == NULL || arg_buf == NULL || out_buf == NULL) {
+    return -EINVAL;
+  }
+
+#if defined(__x86_64__)
+  /*
+   * Reference:
+   *
+   * System V Application Binary Interface
+   * AMD64 Architecture Processor Supplement
+   */
+
+  struct __va_list {
+    unsigned int gp_offset;
+    unsigned int fp_offset;
+    void *overflow_arg_area;
+    void *reg_save_area;
+  };
+
+  union {
+    va_list ap;
+    struct __va_list __ap;
+  } u = {0};
+
+  /* create a valid va_list with our buffer */
+  u.__ap.overflow_arg_area = (void *)arg_buf;
+  u.__ap.reg_save_area = NULL;
+  u.__ap.gp_offset = (6 * 8);
+  u.__ap.fp_offset = (6 * 8 + 16 * 16);
+
+  return vsnprintf(out_buf, out_buf_size_bytes, fmt_str, u.ap);
+
+#elif defined(__aarch64__)
+  // ARM64 - va_list is a complex structure
+  struct __va_list {
+    void *__stack;
+    void *__gr_top;
+    void *__vr_top;
+    int __gr_offs;
+    int __vr_offs;
+  };
+
+  union {
+    va_list ap;
+    struct __va_list __ap;
+  } u;
+
+  // Reconstruct va_list pointing to our buffer
+  u.__ap.__stack = (void *)buffer;
+  u.__ap.__gr_top = NULL;
+  u.__ap.__vr_top = NULL;
+  u.__ap.__gr_offs = 0;
+  u.__ap.__vr_offs = 0;
+
+  return vprintf(fmt_str, u.ap);
+
+#else
+  // Default: assume va_list is just a pointer (ARM32, many others)
+  // This works for most simple architectures
+  union {
+    va_list ap;
+    void *ptr;
+  } u;
+
+  u.ptr = (void *)arg_buf;
+  return vsnprintf(out_buf, out_buf_size_bytes, fmt_str, u.ap);
+
+#endif
+}
 /*****************************************************************************
  * Functions
  *****************************************************************************/
@@ -130,7 +214,7 @@ int frpp_vprintf_package(void *dst, size_t len, uint32_t flags,
 
       FRPP_HANDLE_BUF_OVERRUN(dst, len, out_len, int);
       FRPP_WRITE_ARG(dst, args, out_len, int);
-      out_len += sizeof(int);
+      out_len += FRPP_VA_STACK_ALIGN(int);
       break;
 
     case 'l':
@@ -139,49 +223,49 @@ int frpp_vprintf_package(void *dst, size_t len, uint32_t flags,
 
         FRPP_HANDLE_BUF_OVERRUN(dst, len, out_len, long long);
         FRPP_WRITE_ARG(dst, args, out_len, long long);
-        out_len += sizeof(long long);
+        out_len += FRPP_VA_STACK_ALIGN(long long);
       } else {
         FRPP_HANDLE_BUF_OVERRUN(dst, len, out_len, long);
         FRPP_WRITE_ARG(dst, args, out_len, long);
-        out_len += sizeof(long);
+        out_len += FRPP_VA_STACK_ALIGN(long);
       }
       break;
 
     case 'z':
       FRPP_HANDLE_BUF_OVERRUN(dst, len, out_len, size_t);
       FRPP_WRITE_ARG(dst, args, out_len, size_t);
-      out_len += sizeof(size_t);
+      out_len += FRPP_VA_STACK_ALIGN(size_t);
       break;
 
     case 't':
       FRPP_HANDLE_BUF_OVERRUN(dst, len, out_len, ptrdiff_t);
       FRPP_WRITE_ARG(dst, args, out_len, ptrdiff_t);
-      out_len += sizeof(ptrdiff_t);
+      out_len += FRPP_VA_STACK_ALIGN(ptrdiff_t);
       break;
 
     case 'j':
       FRPP_HANDLE_BUF_OVERRUN(dst, len, out_len, intmax_t);
       FRPP_WRITE_ARG(dst, args, out_len, intmax_t);
-      out_len += sizeof(intmax_t);
+      out_len += FRPP_VA_STACK_ALIGN(intmax_t);
       break;
 
     // Handle pointer and string specifiers
     case 's':
       FRPP_HANDLE_BUF_OVERRUN(dst, len, out_len, char *);
       FRPP_WRITE_ARG(dst, args, out_len, char *);
-      out_len += sizeof(char *);
+      out_len += FRPP_VA_STACK_ALIGN(char *);
       break;
 
     case 'p':
       FRPP_HANDLE_BUF_OVERRUN(dst, len, out_len, void *);
       FRPP_WRITE_ARG(dst, args, out_len, void *);
-      out_len += sizeof(void *);
+      out_len += FRPP_VA_STACK_ALIGN(void *);
       break;
 
     case 'n':
       FRPP_HANDLE_BUF_OVERRUN(dst, len, out_len, int *);
       FRPP_WRITE_ARG(dst, args, out_len, int *);
-      out_len += sizeof(int *);
+      out_len += FRPP_VA_STACK_ALIGN(int *);
       break;
 
     // Handle integer specifiers
@@ -194,7 +278,7 @@ int frpp_vprintf_package(void *dst, size_t len, uint32_t flags,
     case 'c':
       FRPP_HANDLE_BUF_OVERRUN(dst, len, out_len, int);
       FRPP_WRITE_ARG(dst, args, out_len, int);
-      out_len += sizeof(int);
+      out_len += FRPP_VA_STACK_ALIGN(int);
       break;
 
     // Handle float/double specifiers
@@ -206,7 +290,7 @@ int frpp_vprintf_package(void *dst, size_t len, uint32_t flags,
     case 'G':
       FRPP_HANDLE_BUF_OVERRUN(dst, len, out_len, double);
       FRPP_WRITE_ARG(dst, args, out_len, double);
-      out_len += sizeof(double);
+      out_len += FRPP_VA_STACK_ALIGN(double);
       break;
 
     default:
@@ -218,4 +302,10 @@ int frpp_vprintf_package(void *dst, size_t len, uint32_t flags,
   }
 
   return out_len;
+}
+
+int frpp_snprintf(const char *fmt_str, const void *arg_buf, void *out_buf,
+                  size_t out_buf_size_bytes) {
+  return prv_vsnprintf_from_arg_buffer(fmt_str, arg_buf, out_buf,
+                                       out_buf_size_bytes);
 }

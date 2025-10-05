@@ -69,6 +69,20 @@ int frpp_printf_package(void *dst, size_t len, uint32_t flags,
 int frpp_vprintf_package(void *dst, size_t len, uint32_t flags,
                          const char *fmt_str, va_list args);
 
+/**
+ * @brief Perform sprintf with packaged args
+ *
+ * @param fmt_str Format string
+ * @param arg_buf Pointer to argument buffer
+ * @param out_buf Output buffer to write process string to
+ * @param out_buf_size_bytes Length of output buffer
+ * @retval -EINVAL Invalid input arguments
+ * @return Returns error condition outlined above or standard return value
+ * expected from snprintf
+ */
+int frpp_snprintf(const char *fmt_str, const void *arg_buf, void *out_buf,
+                  size_t out_buf_size_bytes);
+
 #ifdef __cplusplus
 }
 #endif
